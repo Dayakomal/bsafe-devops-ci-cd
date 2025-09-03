@@ -1,52 +1,56 @@
 pipeline {
-    agent any
-
-    tools {
-        maven 'MAVEN_HOME'
-        jdk 'JAVA_HOME'
+  agent any
+  environment {
+    IMAGE_NAME = "bsafe-app"
+    IMAGE_TAG  = "latest"
+  }
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
     }
 
-    environment {
-        IMAGE_NAME = "bsafe-app"
-        IMAGE_TAG = "latest"
+    stage('Build & Test (Dockerized Maven)') {
+      steps {
+        sh '''
+          docker run --rm -v "$WORKSPACE":/workspace -w /workspace maven:3.9.9-eclipse-temurin-17 mvn -B -q dependency:go-offline
+          docker run --rm -v "$WORKSPACE":/workspace -w /workspace maven:3.9.9-eclipse-temurin-17 mvn -B clean test package
+        '''
+      }
     }
 
-    stages {
-        stage('Checkout') {
-            steps {
-                git branch: 'main', url: 'https://github.com/Dayakomal/bsafe-devops-ci-cd.git'
-            }
-        }
-
-        stage('Build with Maven') {
-            steps {
-                sh 'mvn -B clean package'
-            }
-        }
-
-        stage('Run Tests') {
-            steps {
-                sh 'mvn test'
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                sh 'docker build -t $IMAGE_NAME:$IMAGE_TAG .'
-            }
-        }
-
-        stage('Run Container') {
-            steps {
-                sh 'docker run -d --name bsafe-container -p 8081:8081 $IMAGE_NAME:$IMAGE_TAG'
-            }
-        }
-
-        stage('Cleanup') {
-            steps {
-                sh 'docker stop bsafe-container || true'
-                sh 'docker rm bsafe-container || true'
-            }
-        }
+    stage('Build Docker Image') {
+      steps {
+        sh 'docker build -t $IMAGE_NAME:$IMAGE_TAG .'
+      }
     }
+
+    stage('Run Container (8081)') {
+      steps {
+        sh '''
+          docker rm -f bsafe-container || true
+          docker run -d --name bsafe-container -p 8081:8081 $IMAGE_NAME:$IMAGE_TAG
+        '''
+      }
+    }
+
+    stage('Smoke Test') {
+      steps {
+        sh '''
+          sleep 5
+          curl -f http://localhost:8081 || (docker logs bsafe-container && false)
+        '''
+      }
+    }
+  }
+  post {
+    always {
+      sh 'docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" || true'
+    }
+    cleanup {
+      sh '''
+        docker stop bsafe-container 2>/dev/null || true
+        docker rm   bsafe-container 2>/dev/null || true
+      '''
+    }
+  }
 }
