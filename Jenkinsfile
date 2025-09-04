@@ -1,56 +1,66 @@
 pipeline {
   agent any
-  environment {
-    IMAGE_NAME = "bsafe-app"
-    IMAGE_TAG  = "latest"
+
+  tools {
+    jdk 'JDK17'    // must match the names you set in Global Tool Configuration
+    maven 'M3'
   }
+
+  options { timestamps() }
+
   stages {
     stage('Checkout') {
-      steps { checkout scm }
-    }
-
-    stage('Build & Test (Dockerized Maven)') {
       steps {
-        sh '''
-          docker run --rm -v "$WORKSPACE":/workspace -w /workspace maven:3.9.9-eclipse-temurin-17 mvn -B -q dependency:go-offline
-          docker run --rm -v "$WORKSPACE":/workspace -w /workspace maven:3.9.9-eclipse-temurin-17 mvn -B clean test package
-        '''
+        checkout scm
       }
     }
 
-    stage('Build Docker Image') {
+    stage('Env Check') {
       steps {
-        sh 'docker build -t $IMAGE_NAME:$IMAGE_TAG .'
+        script {
+          echo "Running on isUnix() = ${isUnix()}"
+        }
+        // print Java & Maven versions using correct shell for the OS
+        script {
+          if (isUnix()) {
+            sh 'java -version || true'
+            sh 'mvn -v'
+          } else {
+            bat 'java -version'
+            bat 'mvn -v'
+          }
+        }
       }
     }
 
-    stage('Run Container (8081)') {
+    stage('Build') {
       steps {
-        sh '''
-          docker rm -f bsafe-container || true
-          docker run -d --name bsafe-container -p 8081:8081 $IMAGE_NAME:$IMAGE_TAG
-        '''
+        script {
+          if (isUnix()) {
+            sh 'mvn -B clean package'
+          } else {
+            bat 'mvn -B clean package'
+          }
+        }
       }
     }
 
-    stage('Smoke Test') {
+    stage('Archive Artifact') {
       steps {
-        sh '''
-          sleep 5
-          curl -f http://localhost:8081 || (docker logs bsafe-container && false)
-        '''
+        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true, allowEmptyArchive: true
       }
     }
   }
+
   post {
     always {
-      sh 'docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" || true'
+      junit 'target/surefire-reports/*.xml'
     }
-    cleanup {
-      sh '''
-        docker stop bsafe-container 2>/dev/null || true
-        docker rm   bsafe-container 2>/dev/null || true
-      '''
+    success {
+      echo 'Build OK ✅'
+    }
+    failure {
+      echo 'Build failed ❌ — check above lines for the FIRST error.'
     }
   }
 }
