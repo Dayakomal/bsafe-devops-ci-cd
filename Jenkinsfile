@@ -2,11 +2,9 @@ pipeline {
   agent any
 
   tools {
-    jdk 'JDK17'    // must match the names you set in Global Tool Configuration
-    maven 'M3'
+    jdk 'JDK17'   // same name you set in Tools
+    maven 'M3'    // same name you set in Tools
   }
-
-  options { timestamps() }
 
   stages {
     stage('Checkout') {
@@ -15,52 +13,23 @@ pipeline {
       }
     }
 
-    stage('Env Check') {
+    stage('Check Environment') {
       steps {
-        script {
-          echo "Running on isUnix() = ${isUnix()}"
-        }
-        // print Java & Maven versions using correct shell for the OS
-        script {
-          if (isUnix()) {
-            sh 'java -version || true'
-            sh 'mvn -v'
-          } else {
-            bat 'java -version'
-            bat 'mvn -v'
-          }
-        }
+        bat 'java -version'
+        bat 'mvn -v'
       }
     }
 
     stage('Build') {
       steps {
-        script {
-          if (isUnix()) {
-            sh 'mvn -B clean package'
-          } else {
-            bat 'mvn -B clean package'
-          }
-        }
+        bat 'mvn clean package'
       }
     }
 
-    stage('Archive Artifact') {
+    stage('Archive') {
       steps {
-        archiveArtifacts artifacts: 'target/*.jar', fingerprint: true, allowEmptyArchive: true
+        archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
       }
-    }
-  }
-
-  post {
-    always {
-      junit 'target/surefire-reports/*.xml'
-    }
-    success {
-      echo 'Build OK ✅'
-    }
-    failure {
-      echo 'Build failed ❌ — check above lines for the FIRST error.'
     }
   }
 }
